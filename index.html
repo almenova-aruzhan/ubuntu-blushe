@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blushe — Catalog</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background:#f6f7fb; color:#111827; }
+    .wrap { max-width: 1100px; margin: 28px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    header { padding: 18px 18px 10px; display:flex; align-items:center; gap:12px; }
+    header h1 { margin:0; font-size: 22px; letter-spacing:.2px; }
+    header .badge { margin-left:auto; font-size: 13px; color:#374151; background:#f3f4f6; border:1px solid #e5e7eb; padding:6px 10px; border-radius: 999px; }
+    .toolbar { padding: 0 18px 16px; display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+    .toolbar input {
+      flex: 1 1 360px;
+      padding: 12px 12px;
+      border-radius: 10px;
+      border:1px solid #d1d5db;
+      outline: none;
+    }
+    .toolbar button {
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #111827;
+      background:#111827;
+      color:#fff;
+      cursor:pointer;
+    }
+    .toolbar button.secondary {
+      border:1px solid #d1d5db;
+      background:#fff;
+      color:#111827;
+    }
+    .hint { font-size: 12px; color:#6b7280; padding: 0 18px 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align:left;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color:#6b7280;
+      padding: 12px 18px;
+      border-top:1px solid #e5e7eb;
+      border-bottom:1px solid #e5e7eb;
+      background:#fafafa;
+    }
+    tbody td {
+      padding: 12px 18px;
+      border-bottom:1px solid #f1f5f9;
+      vertical-align: top;
+    }
+    tbody tr:hover { background:#fbfdff; }
+    .sku { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color:#374151; }
+    .muted { color:#6b7280; font-size: 12px; margin-top: 2px; }
+    .price { font-weight: 700; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding: 5px 9px; border-radius:999px; font-size:12px; border:1px solid #e5e7eb; background:#fff; color:#111827;}
+    .star { color:#f59e0b; }
+    .right { text-align:right; }
+    .empty { padding: 22px 18px; color:#6b7280; }
+    .footer { padding: 14px 18px; display:flex; justify-content:space-between; gap:10px; color:#6b7280; font-size:12px; }
+    .link { color:#2563eb; text-decoration:none; }
+    .danger { color:#b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <h1>Blushe</h1>
+        <div class="badge" id="countBadge">— товаров</div>
+      </header>
+
+      <div class="toolbar">
+        <input id="q" placeholder="Поиск: название / описание" autocomplete="off" />
+        <button id="searchBtn">Искать</button>
+        <button class="secondary" id="resetBtn">Сброс</button>
+      </div>
+
+      <div class="hint">
+        API: <a class="link" href="/api/products" target="_blank">/api/products</a>
+        · Health: <a class="link" href="/api/health" target="_blank">/api/health</a>
+      </div>
+
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:160px;">SKU</th>
+              <th>Товар</th>
+              <th style="width:160px;">Цена</th>
+              <th style="width:170px;">Рейтинг</th>
+              <th style="width:120px;" class="right">Остаток</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td class="empty" colspan="5">Загрузка…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="footer">
+        <div id="statusLine">Готово</div>
+        <div>Подсказка: попробуй искать “lip”, “blush”, “matte”</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const tbody = document.getElementById('tbody');
+  const qInput = document.getElementById('q');
+  const countBadge = document.getElementById('countBadge');
+  const statusLine = document.getElementById('statusLine');
+
+  function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+  // Чтобы выглядело как магазин: рейтинг/остаток сгенерим стабильно от id (без изменения БД)
+  function pseudoRand(seed) {
+    let x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+  }
+  function ratingFromId(id) {
+    const r = 3.7 + pseudoRand(id) * 1.3; // 3.7..5.0
+    return Math.round(r * 10) / 10;
+  }
+  function stockFromId(id) {
+    return 5 + Math.floor(pseudoRand(id * 999) * 45); // 5..49
+  }
+  function skuFromId(id) {
+    return `BL-${String(id).padStart(4,'0')}`;
+  }
+
+  async function load() {
+    const q = qInput.value.trim();
+    const url = q ? `/api/products?q=${encodeURIComponent(q)}&limit=50` : `/api/products?limit=50`;
+
+    statusLine.textContent = 'Загрузка…';
+    tbody.innerHTML = `<tr><td class="empty" colspan="5">Загрузка…</td></tr>`;
+
+    try {
+      const res = await fetch(url, { headers: { 'Accept':'application/json' } });
+      const data = await res.json();
+
+      if (!res.ok || data.status === 'error' || data.ok === false) {
+        const msg = data.message || data.error || ('HTTP ' + res.status);
+        tbody.innerHTML = `<tr><td class="empty danger" colspan="5">Ошибка: ${esc(msg)}</td></tr>`;
+        countBadge.textContent = '— товаров';
+        statusLine.textContent = 'Ошибка';
+        return;
+      }
+
+      const rows = data.data || data.products || [];
+      const total = (data.meta && typeof data.meta.total === 'number') ? data.meta.total : rows.length;
+
+      countBadge.textContent = `${total} товаров`;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td class="empty" colspan="5">Ничего не найдено</td></tr>`;
+        statusLine.textContent = 'Пусто';
+        return;
+      }
+
+      tbody.innerHTML = rows.map(p => {
+        const id = Number(p.id || 0);
+        const rating = ratingFromId(id);
+        const stock = stockFromId(id);
+        const sku = skuFromId(id);
+
+        return `
+          <tr>
+            <td class="sku">${esc(sku)}<div class="muted">id: ${esc(id)}</div></td>
+            <td>
+              <div><b>${esc(p.name)}</b></div>
+              <div class="muted">${esc(p.description || '')}</div>
+              <div class="muted">${esc(p.created_at || '')}</div>
+            </td>
+            <td><span class="price">${esc(p.price)}</span></td>
+            <td><span class="pill"><span class="star">★</span> ${esc(rating)}</span></td>
+            <td class="right">${esc(stock)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      statusLine.textContent = q ? `Результаты по запросу: "${q}"` : 'Показаны все товары';
+
+    } catch (e) {
+      tbody.innerHTML = `<tr><td class="empty danger" colspan="5">Ошибка: ${esc(e.message)}</td></tr>`;
+      statusLine.textContent = 'Ошибка';
+    }
+  }
+
+  document.getElementById('searchBtn').addEventListener('click', load);
+  document.getElementById('resetBtn').addEventListener('click', () => { qInput.value=''; load(); });
+  qInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+
+  // Автопоиск с задержкой
+  let t=null;
+  qInput.addEventListener('input', () => { clearTimeout(t); t=setTimeout(load, 300); });
+
+  load();
+</script>
+<script src='https://salebot.pro/js/chatbot.js?v=1' charset='utf-8'></script><script>  ChatBotPro.init({    onlineChatId: '5366'  });</script>
+</body>
+</html>
